@@ -14,6 +14,51 @@ from datasets.utils import build_data_loader
 import clip
 from utils import *
 
+from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+from qwen_vl_utils import process_vision_info
+
+def get_qwen2vl_features(image):
+    processor = AutoProcessor.from_pretrained("Qwen/Qwen2-VL-2B-Instruct")
+    model = Qwen2VLForConditionalGeneration.from_pretrained("Qwen/Qwen2-VL-2B-Instruct",
+                                                            torch_dtype=torch.float16).cuda()
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "image": image,
+                },
+                {"type": "text", "text": "Summary above image in one word: "},
+            ],
+        }
+    ]
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    image_inputs, video_inputs = process_vision_info(messages)
+    text_inputs = processor(
+    text=[text],
+    images=image_inputs,
+    padding=True,
+    return_tensors="pt",
+)
+    inputs = inputs.to("cuda")
+
+
+    with torch.no_grad():
+        text_embs = model(**text_inputs, output_hidden_states=True, return_dict=True).hidden_states[-1][:, -1, :]
+    return text_embs
+
+
+
+
+
+
+
+
 
 def get_arguments():
 
