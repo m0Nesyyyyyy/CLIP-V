@@ -17,45 +17,6 @@ from utils import *
 from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor
 from qwen_vl_utils import process_vision_info
 
-def get_qwen2vl_features(image):
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen2-VL-2B-Instruct")
-    model = Qwen2VLForConditionalGeneration.from_pretrained("Qwen/Qwen2-VL-2B-Instruct",
-                                                            torch_dtype=torch.float16).cuda()
-
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "image": image,
-                },
-                {"type": "text", "text": "Summary above image in one word: "},
-            ],
-        }
-    ]
-    text = processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-
-    image_inputs, video_inputs = process_vision_info(messages)
-    text_inputs = processor(
-    text=[text],
-    images=image_inputs,
-    padding=True,
-    return_tensors="pt",
-)
-    inputs = inputs.to("cuda")
-
-
-    with torch.no_grad():
-        text_embs = model(**text_inputs, output_hidden_states=True, return_dict=True).hidden_states[-1][:, -1, :]
-    return text_embs
-
-
-
-
-
 
 
 
@@ -205,6 +166,13 @@ def main():
     clip_model, preprocess = clip.load(cfg['backbone'])
     clip_model.eval()
 
+    #qwen2vl
+    processor = AutoProcessor.from_pretrained("/home/liweiyan/workspace/Tip-Adapter/qwen2-vl/Qwen/Qwen2-VL-2B-Instruct/")
+    qwen_model = Qwen2VLForConditionalGeneration.from_pretrained("/home/liweiyan/workspace/Tip-Adapter/qwen2-vl/Qwen/Qwen2-VL-2B-Instruct/",
+                                                            torch_dtype=torch.float16).cuda()
+
+
+
     # Prepare dataset
     random.seed(1)
     torch.manual_seed(1)
@@ -229,23 +197,33 @@ def main():
     print("\nGetting textual features as CLIP's classifier.")
     clip_weights = clip_classifier(dataset.classnames, dataset.template, clip_model)
 
+    print("\nGetting textual features as Qwen2-VL's classifier.")
+    qwen2vl_weights = qwen2vl_classifier(dataset.classnames, dataset.template, qwen_model, processor)
+
+
     # Construct the cache model by few-shot training set
+    # print("\nConstructing cache model by few-shot visual features and labels.")
+    # cache_keys, cache_values = build_cache_model(cfg, clip_model, train_loader_cache)
+
+
     print("\nConstructing cache model by few-shot visual features and labels.")
-    cache_keys, cache_values = build_cache_model(cfg, clip_model, train_loader_cache)
+    cache_keys, cache_values = build_qwen_cache_model(cfg, qwen_model, processor, train_loader_cache)
 
     # Pre-load val features
     print("\nLoading visual features and labels from val set.")
-    val_features, val_labels = pre_load_features(cfg, "val", clip_model, val_loader)
+    #val_features, val_labels = pre_load_features(cfg, "val", clip_model, val_loader)
+    val_features, val_labels = pre_load_qwen2vl_features(cfg, "val", qwen_model, processor, val_loader)
 
     # Pre-load test features
     print("\nLoading visual features and labels from test set.")
-    test_features, test_labels = pre_load_features(cfg, "test", clip_model, test_loader)
+    #test_features, test_labels = pre_load_features(cfg, "test", clip_model, test_loader)
+    test_features, test_labels = pre_load_qwen2vl_features(cfg, "test", qwen_model, processor, test_loader)
 
     # ------------------------------------------ Tip-Adapter ------------------------------------------
-    run_tip_adapter(cfg, cache_keys, cache_values, val_features, val_labels, test_features, test_labels, clip_weights)
+    run_tip_adapter(cfg, cache_keys, cache_values, val_features, val_labels, test_features, test_labels, qwen2vl_weights)
 
     # ------------------------------------------ Tip-Adapter-F ------------------------------------------
-    run_tip_adapter_F(cfg, cache_keys, cache_values, val_features, val_labels, test_features, test_labels, clip_weights, clip_model, train_loader_F)
+    #run_tip_adapter_F(cfg, cache_keys, cache_values, val_features, val_labels, test_features, test_labels, clip_weights, clip_model, train_loader_F)
            
 
 if __name__ == '__main__':
